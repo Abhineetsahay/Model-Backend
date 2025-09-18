@@ -46,8 +46,8 @@ def build_response(status_code, message, body=None):
     }), status_code
 
 
-@app.route("/register", methods=["POST"])
-def register():
+@app.route("/login", methods=["POST"])
+def login():
     try:
         data = request.json
         if not data or "user_id" not in data or "password" not in data:
@@ -149,7 +149,7 @@ def get_cattle():
 
 
 @app.route("/upload-and-predict", methods=["POST"])
-def upload_image():
+def upload_and_predict():
     try:
         if 'image' not in request.files:
             return build_response(400, "No image file provided", None)
@@ -201,13 +201,13 @@ def upload_image():
             **metadata,
             "predictions": predictions
         }
-        result = collection.insert_one(doc)
+        # result = collection.insert_one(doc)
 
         return build_response(
             201,
             "Image uploaded and predicted successfully",
             {
-                "id": str(result.inserted_id),
+                # "id": str(result.inserted_id),
                 "url": upload_result.get("secure_url"),
                 "predictions": predictions
             }

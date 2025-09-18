@@ -3,4 +3,5 @@ pymongo
 python-dotenv
 cloudinary
 torch
+torchvision
 Pillow
