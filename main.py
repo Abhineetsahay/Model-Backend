@@ -5,8 +5,16 @@ import os
 import cloudinary
 import cloudinary.uploader
 from datetime import datetime
-from bson import ObjectId
 from bson.objectid import ObjectId
+from PIL import Image
+import torch
+import io
+from torchvision import transforms
+from PIL import Image
+import torch
+import io
+from torchvision import transforms
+import torch.nn.functional as F
 
 load_dotenv()
 
@@ -37,21 +45,9 @@ def build_response(status_code, message, body=None):
         "body": body
     }), status_code
 
-@app.route("/push", methods=["POST"])
-def push_data():
-    try:
-        data = request.json
-        if not data:
-            return build_response(400, "No data provided", None)
 
-        result = collection.insert_one(data)
-        return build_response(201, "Data inserted", {"id": str(result.inserted_id)})
-
-    except Exception as e:
-        return build_response(500, "Internal Server Error", {"error": str(e)})
-
-@app.route("/login", methods=["POST"])
-def login():
+@app.route("/register", methods=["POST"])
+def register():
     try:
         data = request.json
         if not data or "user_id" not in data or "password" not in data:
@@ -64,10 +60,9 @@ def login():
         if existing_user:
             return build_response(409, "User ID already exists", None)
 
-        # Insert new user
         result = collection.insert_one({
             "user_id": user_id,
-            "password": password  
+            "password": password
         })
 
         return build_response(
@@ -93,14 +88,12 @@ def push_cattle():
                 return build_response(400, f"Missing required field: {field}", None)
 
         user_id = data["user_id"]
-        breed_name = data["breed"]   # 👈 breed name from request (e.g. "Gir")
+        breed_name = data["breed"]
 
-        # ✅ Check if user exists
         user = collection.find_one({"user_id": user_id})
         if not user:
             return build_response(404, "User not found", None)
 
-        # ✅ Search breed in Breed collection by BreedName
         breed_collection = db["Breed"]
         breed = breed_collection.find_one({"BreedName": breed_name})
         if not breed:
@@ -114,8 +107,8 @@ def push_cattle():
             "species": data["species"],
             "sex": data.get("sex"),
             "dob": data.get("dob"),
-            "breed_id": str(breed["_id"]),     # store Mongo ObjectId
-            "breed_name": breed["BreedName"]   # take from Breed collection
+            "breed_id": str(breed["_id"]),
+            "breed_name": breed["BreedName"]
         }
 
         collection.update_one(
@@ -125,7 +118,7 @@ def push_cattle():
 
         return build_response(
             201,
-            "Cattle added successfully to user",
+            "Cattle added successfully",
             {
                 "user_id": user_id,
                 "tag_number": data["tag_number"],
@@ -136,7 +129,6 @@ def push_cattle():
 
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
-
 
 
 @app.route("/get-cattle", methods=["GET"])
@@ -150,33 +142,13 @@ def get_cattle():
         if not user:
             return build_response(404, "User not found", None)
 
-        cattles = user.get("cattles", [])
-        return build_response(200, "Cattle data fetched successfully", cattles)
+        return build_response(200, "Cattle data fetched successfully", user.get("cattles", []))
 
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
-    
 
-@app.route("/get-breed/<breed_id>", methods=["GET"])
-def get_breed_by_id(breed_id):
-    try:
-        breed_collection = db["Breed"]
-        # Route to fetch breed details by breed_id
-        if not ObjectId.is_valid(breed_id):
-            return build_response(400, "Invalid breed_id format", None)
 
-        # 🔍 Find by MongoDB ObjectId
-        breed = breed_collection.find_one({"_id": ObjectId(breed_id)}, {"_id": 0})
-        if not breed:
-            return build_response(404, f"Breed with id {breed_id} not found", None)
-
-        return build_response(200, "Breed fetched successfully", breed)
-
-    except Exception as e:
-        return build_response(500, "Internal Server Error", {"error": str(e)})
-    
-    
-@app.route("/upload-image", methods=["POST"])
+@app.route("/upload-and-predict", methods=["POST"])
 def upload_image():
     try:
         if 'image' not in request.files:
@@ -189,25 +161,62 @@ def upload_image():
             "description": request.form.get("description")
         }
 
+        model = torch.load("breed_classifier_production.pt", map_location=torch.device("cpu"), weights_only=False)
+        model.eval()
+
+        img_bytes = image_file.read()
+        image = Image.open(io.BytesIO(img_bytes)).convert('RGB')
+        preprocess = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+        ])
+        input_tensor = preprocess(image).unsqueeze(0)
+
+        with torch.no_grad():
+            output = model(input_tensor)
+            probabilities = F.softmax(output, dim=1) 
+            top_probs, top_idxs = torch.topk(probabilities, 3)  
+
+        class_labels = ['Alambadi', 'Amritmahal', 'Ayrshire', 'Banni', 'Bargur', 'Bhadawari', 'Brown Swiss', 'Dangi', 'Deoni', 'Gir', 'Guernsey', 'Hallikar', 'Hariana', 'Holstein Friesian', 'Jaffarabadi', 'Jersey', 'Kangayam', 'Kankrej', 'Kasaragod', 'Kenkatha', 'Kherigarh', 'Khillari', 'Krishna Valley', 'Malnad Gidda', 'Mehsana', 'Murrah', 'Nagori', 'Nagpuri', 'Nili Ravi', 'Nimari', 'Ongole', 'Pulikulam', 'Rathi', 'Red Dane', 'Red Sindhi', 'Sahiwal', 'Surti', 'Tharparkar', 'Toda', 'Umblachery','Vechur']
+
+        predictions = []
+        for prob, idx in zip(top_probs[0], top_idxs[0]):
+            if idx.item() < len(class_labels):
+                label = class_labels[idx.item()]
+            else:
+                label = f"Unknown({idx.item()})"
+            predictions.append({
+                "breed": label,
+                "accuracy": round(prob.item() * 100, 2)
+            })
+
+        image_file.seek(0) 
         upload_result = cloudinary.uploader.upload(
             image_file,
-            folder="Model" 
+            folder="Model"
         )
 
         doc = {
             "url": upload_result.get("secure_url"),
-            **metadata
+            **metadata,
+            "predictions": predictions
         }
         result = collection.insert_one(doc)
 
         return build_response(
             201,
-            "Image uploaded successfully",
-            {"id": str(result.inserted_id), "url": upload_result.get("secure_url")}
+            "Image uploaded and predicted successfully",
+            {
+                "id": str(result.inserted_id),
+                "url": upload_result.get("secure_url"),
+                "predictions": predictions
+            }
         )
 
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
+
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
