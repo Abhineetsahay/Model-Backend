@@ -5,7 +5,6 @@ import os
 import cloudinary
 import cloudinary.uploader
 from datetime import datetime
-from bson.objectid import ObjectId
 from PIL import Image
 import torch
 import io
