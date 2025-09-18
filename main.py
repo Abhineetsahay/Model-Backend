@@ -21,14 +21,12 @@ except errors.ConnectionFailure as e:
     print(f"MongoDB connection failed: {e}")
     collection = None
 
-
 def build_response(status_code, message, body=None):
     return jsonify({
         "status_code": status_code,
         "message": message,
         "body": body
     }), status_code
-
 
 # Insert data
 @app.route("/push", methods=["POST"])
@@ -44,7 +42,7 @@ def push_data():
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
 
-
+# Get data
 @app.route("/get", methods=["GET"])
 def get_data():
     try:
@@ -57,6 +55,6 @@ def get_data():
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
 
-
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000)) 
+    app.run(host="0.0.0.0", port=port, debug=True)
