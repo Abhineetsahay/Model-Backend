@@ -1,40 +1,13 @@
-````markdown
 # Mock API Documentation
 
-This API provides endpoints for user registration, cattle management, breed fetching, and image uploads.
+This API provides endpoints for user registration, cattle management, breed fetching, and image uploads with ML-based breed prediction.
 
 ---
 
-## **1. Push Data**
-- **URL:** `/push`  
-- **Method:** `POST`  
-- **Request Body:** JSON  
-```json
-{
-  "key": "value",
-  ...
-}
-````
+## **1. User Login / Registration**
 
-* **Description:** Insert arbitrary data into the default collection.
-* **Response:**
-
-```json
-{
-  "status_code": 201,
-  "message": "Data inserted",
-  "body": {
-    "id": "mongo_inserted_id"
-  }
-}
-```
-
----
-
-## **2. User Login / Registration**
-
-* **URL:** `/login`
-* **Method:** `POST`
+* **URL:** `/login`  
+* **Method:** `POST`  
 * **Request Body:** JSON
 
 ```json
@@ -44,7 +17,7 @@ This API provides endpoints for user registration, cattle management, breed fetc
 }
 ```
 
-* **Description:** Registers a new user. Returns conflict if user already exists.
+* **Description:** Registers a new user. Returns conflict if user already exists.  
 * **Response:**
 
 ```json
@@ -60,10 +33,10 @@ This API provides endpoints for user registration, cattle management, breed fetc
 
 ---
 
-## **3. Add Cattle**
+## **2. Add Cattle**
 
-* **URL:** `/push-cattle`
-* **Method:** `POST`
+* **URL:** `/push-cattle`  
+* **Method:** `POST`  
 * **Request Body:** JSON
 
 ```json
@@ -80,13 +53,13 @@ This API provides endpoints for user registration, cattle management, breed fetc
 }
 ```
 
-* **Description:** Adds a cattle entry to the user's `cattles` array.
+* **Description:** Adds a cattle entry to the user's `cattles` array.  
 * **Response:**
 
 ```json
 {
   "status_code": 201,
-  "message": "Cattle added successfully to user",
+  "message": "Cattle added successfully",
   "body": {
     "user_id": "user_id",
     "tag_number": "tag_number",
@@ -98,19 +71,18 @@ This API provides endpoints for user registration, cattle management, breed fetc
 
 ---
 
-## **4. Get Cattles**
+## **3. Get Cattles**
 
-* **URL:** `/get-cattle`
-http://localhost:5000/get-cattle?userId=abhineet1243
-
-* **Method:** `GET`
+* **URL:** `/get-cattle?userId=XXXX`  
+  Example: `http://localhost:5000/get-cattle?userId=abhineet1243`  
+* **Method:** `GET`  
 * **Query Parameters:**
 
 ```text
 userId=<user_id>
 ```
 
-* **Description:** Fetches all cattle data for a given user.
+* **Description:** Fetches all cattle data for a given user.  
 * **Response:**
 
 ```json
@@ -128,25 +100,24 @@ userId=<user_id>
       "dob": "YYYY-MM-DD",
       "breed_id": "mongo_object_id",
       "breed_name": "string"
-    },
-    ...
+    }
   ]
 }
 ```
 
 ---
 
-## **5. Get Breed by ID**
+## **4. Get Breed by ID**
 
-* **URL:** `/get-breed/<breed_id>`
-* **Method:** `GET`
+* **URL:** `/get-breed/<breed_id>`  
+* **Method:** `GET`  
 * **Path Parameters:**
 
 ```text
 breed_id = Mongo ObjectId
 ```
 
-* **Description:** Fetches breed details from the `Breed` collection using its MongoDB ObjectId.
+* **Description:** Fetches breed details from the `Breed` collection using its MongoDB ObjectId.  
 * **Response:**
 
 ```json
@@ -163,27 +134,42 @@ breed_id = Mongo ObjectId
 
 ---
 
-## **6. Upload Image**
+## **5. Upload & Predict Image**
 
-* **URL:** `/upload-image`
-* **Method:** `POST`
+* **URL:** `/upload-and-predict`  
+* **Method:** `POST`  
 * **Request:** `multipart/form-data`
 
   * **Fields:**
+    * `image`: image file (**required**)  
+    * `name`: string (optional)  
+    * `description`: string (optional)  
 
-    * `image`: image file (required)
-    * `name`: string (optional)
-    * `description`: string (optional)
-* **Description:** Uploads an image to Cloudinary and stores metadata in the collection.
+* **Description:**  
+  Uploads an image to Cloudinary, runs the ML model to classify the cattle/breed, and returns the **top 3 predictions with accuracies**.  
+
 * **Response:**
 
 ```json
 {
   "status_code": 201,
-  "message": "Image uploaded successfully",
+  "message": "Image uploaded and predicted successfully",
   "body": {
-    "id": "mongo_inserted_id",
-    "url": "cloudinary_image_url"
+    "url": "cloudinary_image_url",
+    "predictions": [
+      {
+        "breed": "Gir",
+        "accuracy": 87.32
+      },
+      {
+        "breed": "Sahiwal",
+        "accuracy": 8.45
+      },
+      {
+        "breed": "Hallikar",
+        "accuracy": 4.23
+      }
+    ]
   }
 }
 ```
@@ -205,10 +191,5 @@ breed_id = Mongo ObjectId
 ```
 
 * Dates should follow `YYYY-MM-DD` format where applicable.
+* The ML model currently supports **classification into 40+ breeds** (e.g., Gir, Sahiwal, Jersey, Holstein Friesian, etc.).
 
-```
-
-I can also make a **more compact table version** that lists all routes with their method, request, and response in one glance. It’s easier for quick reference.  
-
-Do you want me to do that too?
-```
