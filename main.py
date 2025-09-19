@@ -189,8 +189,8 @@ def upload_and_predict():
             "name": request.form.get("name"),
             "description": request.form.get("description")
         }
-
-        model = torch.load("breed_classifier_production.pt", map_location=torch.device("cpu"), weights_only=False)
+        
+        model = torch.load("breed_classifier_final_prod.pt", map_location=torch.device("cpu"), weights_only=False)
         model.eval()
 
         img_bytes = image_file.read()
