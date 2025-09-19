@@ -14,6 +14,7 @@ import torch
 import io
 from torchvision import transforms
 import torch.nn.functional as F
+from bson import ObjectId
 
 load_dotenv()
 
@@ -49,6 +50,7 @@ def build_response(status_code, message, body=None):
 def login():
     try:
         data = request.json
+        print("Received data:", data)  # DEBUG
         if not data or "user_id" not in data or "password" not in data:
             return build_response(400, "user_id and password are required", None)
 
@@ -57,7 +59,11 @@ def login():
 
         existing_user = collection.find_one({"user_id": user_id})
         if existing_user:
-            return build_response(409, "User ID already exists", None)
+            return build_response(
+                200,
+                "User already exists",
+                {"id": str(existing_user["_id"]), "user_id": existing_user["user_id"]}
+            )
 
         result = collection.insert_one({
             "user_id": user_id,
@@ -71,6 +77,7 @@ def login():
         )
 
     except Exception as e:
+        print("Exception:", e)  # DEBUG
         return build_response(500, "Internal Server Error", {"error": str(e)})
 
 
@@ -130,8 +137,8 @@ def push_cattle():
         return build_response(500, "Internal Server Error", {"error": str(e)})
 
 
-@app.route("/get-breed", methods=["GET"])
-def get_breed():
+@app.route("/get-cattle", methods=["GET"])
+def get_cattle():
     try:
         user_id = request.args.get("userId")
         if not user_id:
@@ -146,6 +153,23 @@ def get_breed():
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
 
+@app.route("/get-breed/<breed_id>", methods=["GET"])
+def get_breed(breed_id):
+    try:
+        breed_collection = db["Breed"]
+
+        if not ObjectId.is_valid(breed_id):
+            return build_response(400, "Invalid breed_id format", None)
+
+        breed = breed_collection.find_one({"_id": ObjectId(breed_id)}, {"_id": 0})
+        if not breed:
+            return build_response(404, "Breed not found", None)
+
+        return build_response(200, "Breed fetched successfully", breed)
+
+    except Exception as e:
+        return build_response(500, "Internal Server Error", {"error": str(e)})
+    
 
 @app.route("/upload-and-predict", methods=["POST"])
 def upload_and_predict():
@@ -160,9 +184,11 @@ def upload_and_predict():
             "description": request.form.get("description")
         }
 
+        # Load model
         model = torch.load("breed_classifier_production.pt", map_location=torch.device("cpu"), weights_only=False)
         model.eval()
 
+        # Preprocess image
         img_bytes = image_file.read()
         image = Image.open(io.BytesIO(img_bytes)).convert('RGB')
         preprocess = transforms.Compose([
@@ -171,42 +197,52 @@ def upload_and_predict():
         ])
         input_tensor = preprocess(image).unsqueeze(0)
 
+        # Predict
         with torch.no_grad():
             output = model(input_tensor)
-            probabilities = F.softmax(output, dim=1) 
-            top_probs, top_idxs = torch.topk(probabilities, 3)  
+            probabilities = F.softmax(output, dim=1)
+            top_probs, top_idxs = torch.topk(probabilities, 3)
 
         class_labels = ['Alambadi', 'Amritmahal', 'Ayrshire', 'Banni', 'Bargur', 'Bhadawari', 'Brown Swiss', 'Dangi', 'Deoni', 'Gir', 'Guernsey', 'Hallikar', 'Hariana', 'Holstein Friesian', 'Jaffarabadi', 'Jersey', 'Kangayam', 'Kankrej', 'Kasaragod', 'Kenkatha', 'Kherigarh', 'Khillari', 'Krishna Valley', 'Malnad Gidda', 'Mehsana', 'Murrah', 'Nagori', 'Nagpuri', 'Nili Ravi', 'Nimari', 'Ongole', 'Pulikulam', 'Rathi', 'Red Dane', 'Red Sindhi', 'Sahiwal', 'Surti', 'Tharparkar', 'Toda', 'Umblachery','Vechur']
 
+        breed_collection = db["Breed"]
+
+        # Get top predicted breed names
+        top_breeds = [class_labels[idx.item()] if idx.item() < len(class_labels) else f"Unknown({idx.item()})" 
+                      for idx in top_idxs[0]]
+
+        # Query MongoDB once for all top breed IDs
+        breed_docs = breed_collection.find({"BreedName": {"$in": top_breeds}}, {"_id": 1, "BreedName": 1})
+        breed_map = {doc["BreedName"]: str(doc["_id"]) for doc in breed_docs}
+
         predictions = []
-        for prob, idx in zip(top_probs[0], top_idxs[0]):
-            if idx.item() < len(class_labels):
-                label = class_labels[idx.item()]
-            else:
-                label = f"Unknown({idx.item()})"
+        for prob, breed_name in zip(top_probs[0], top_breeds):
             predictions.append({
-                "breed": label,
+                "breed": breed_name,
+                "breed_id": breed_map.get(breed_name),
                 "accuracy": round(prob.item() * 100, 2)
             })
 
-        image_file.seek(0) 
+        # Upload image to Cloudinary
+        image_file.seek(0)
         upload_result = cloudinary.uploader.upload(
             image_file,
             folder="Model"
         )
 
+        # Store document in DB
         doc = {
             "url": upload_result.get("secure_url"),
             **metadata,
             "predictions": predictions
         }
-        # result = collection.insert_one(doc)
+        result = collection.insert_one(doc)
 
         return build_response(
             201,
             "Image uploaded and predicted successfully",
             {
-                # "id": str(result.inserted_id),
+                "id": str(result.inserted_id),
                 "url": upload_result.get("secure_url"),
                 "predictions": predictions
             }
@@ -214,8 +250,6 @@ def upload_and_predict():
 
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
-
-
 
 @app.route("/")
 def home():

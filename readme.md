@@ -4,7 +4,7 @@ This API provides endpoints for user registration, cattle management, breed fetc
 
 ---
 
-## **1. User Login / Registration**
+## **1. User Login**
 
 * **URL:** `/login`  
 * **Method:** `POST`  
