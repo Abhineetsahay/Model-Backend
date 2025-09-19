@@ -1,12 +1,9 @@
 from flask import Flask, request, jsonify
+import time
 from pymongo import MongoClient, errors
 from dotenv import load_dotenv
 import os
 from datetime import datetime
-from PIL import Image
-import torch
-import io
-from torchvision import transforms
 from PIL import Image
 import torch
 import io
@@ -30,7 +27,10 @@ except errors.ConnectionFailure as e:
     print(f"MongoDB connection failed: {e}")
     collection = None
 
-model = torch.jit.load("breed_classifier_final_prod.pt", map_location="cpu")
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = torch.jit.load("breed_classifier_final_prod.pt", map_location=device)
+model = torch.jit.optimize_for_inference(model) 
 model.eval()
 
 preprocess = transforms.Compose([
@@ -38,15 +38,23 @@ preprocess = transforms.Compose([
     transforms.ToTensor(),
 ])
 
-class_labels = ['Alambadi', 'Amritmahal', 'Ayrshire', 'Banni', 'Bargur', 'Bhadawari',
+# ------------------ CLASS LABELS ------------------
+class_labels = [
+    'Alambadi', 'Amritmahal', 'Ayrshire', 'Banni', 'Bargur', 'Bhadawari',
     'Brown Swiss', 'Dangi', 'Deoni', 'Gir', 'Guernsey', 'Hallikar', 'Hariana',
     'Holstein Friesian', 'Jaffarabadi', 'Jersey', 'Kangayam', 'Kankrej',
     'Kasaragod', 'Kenkatha', 'Kherigarh', 'Khillari', 'Krishna Valley',
     'Malnad Gidda', 'Mehsana', 'Murrah', 'Nagori', 'Nagpuri', 'Nili Ravi',
     'Nimari', 'Ongole', 'Pulikulam', 'Rathi', 'Red Dane', 'Red Sindhi',
-    'Sahiwal', 'Surti', 'Tharparkar', 'Toda', 'Umblachery','Vechur'
+    'Sahiwal', 'Surti', 'Tharparkar', 'Toda', 'Umblachery', 'Vechur'
 ]
 
+# ------------------ CACHE BREEDS ------------------
+breed_collection = db["Breed"]
+breed_docs = list(breed_collection.find({}, {"_id": 1, "BreedName": 1}))
+BREED_MAP = {doc["BreedName"]: str(doc["_id"]) for doc in breed_docs}
+
+# ------------------ RESPONSE BUILDER ------------------
 def build_response(status_code, message, body=None):
     return jsonify({
         "status_code": status_code,
@@ -54,7 +62,7 @@ def build_response(status_code, message, body=None):
         "body": body
     }), status_code
 
-
+# ------------------ LOGIN ------------------
 @app.route("/login", methods=["POST"])
 def login():
     try:
@@ -68,16 +76,10 @@ def login():
         existing_user = collection.find_one({"user_id": user_id})
         if existing_user:
             existing_user["_id"] = str(existing_user["_id"])
-    
             if "password" in existing_user:
+                existing_user.pop("cattles")
                 existing_user.pop("password")
-    
-            return build_response(
-                200,
-                "User already exists",
-                existing_user
-            )
-
+            return build_response(200, "User already exists", existing_user)
 
         result = collection.insert_one({
             "user_id": user_id,
@@ -91,10 +93,9 @@ def login():
         )
 
     except Exception as e:
-        print("Exception:", e)  # DEBUG
         return build_response(500, "Internal Server Error", {"error": str(e)})
 
-
+# ------------------ PUSH CATTLE ------------------
 @app.route("/push-cattle", methods=["POST"])
 def push_cattle():
     try:
@@ -114,7 +115,6 @@ def push_cattle():
         if not user:
             return build_response(404, "User not found", None)
 
-        breed_collection = db["Breed"]
         breed = breed_collection.find_one({"BreedName": breed_name})
         if not breed:
             return build_response(404, f"Breed '{breed_name}' not found", None)
@@ -150,7 +150,7 @@ def push_cattle():
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
 
-
+# ------------------ GET CATTLE ------------------
 @app.route("/get-cattle", methods=["GET"])
 def get_cattle():
     try:
@@ -167,12 +167,10 @@ def get_cattle():
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
 
-
+# ------------------ GET BREED ------------------
 @app.route("/get-breed/<breed_id>", methods=["GET"])
 def get_breed(breed_id):
     try:
-        breed_collection = db["Breed"]
-
         if not ObjectId.is_valid(breed_id):
             return build_response(400, "Invalid breed_id format", None)
 
@@ -184,55 +182,62 @@ def get_breed(breed_id):
 
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
-    
 
+# ------------------ UPLOAD & PREDICT ------------------
 @app.route("/upload-and-predict", methods=["POST"])
+
 def upload_and_predict():
     try:
+        start_total = time.time()
         if "image" not in request.files:
-            return jsonify({"message": "No image file provided"}), 400
+            return build_response(400, "No image file provided", None)
 
         image_file = request.files["image"]
         img_bytes = image_file.read()
-
+        start_preprocess = time.time()
         # Preprocess
         image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        input_tensor = preprocess(image).unsqueeze(0)
+        input_tensor = preprocess(image).unsqueeze(0).to(device)
+        preprocess_time = time.time() - start_preprocess
 
+        # Inference
+        start_infer = time.time()
         with torch.no_grad():
             output = model(input_tensor)
             probabilities = F.softmax(output, dim=1)
             top_probs, top_idxs = torch.topk(probabilities, 3)
+        infer_time = time.time() - start_infer
 
-        top_breeds = [class_labels[idx.item()] if idx.item() < len(class_labels) else f"Unknown({idx.item()})"
-                      for idx in top_idxs[0]]
-        breed_collection = db["Breed"]
-        breed_docs = breed_collection.find({"BreedName": {"$in": top_breeds}}, {"_id": 1, "BreedName": 1})
-        breed_map = {doc["BreedName"]: str(doc["_id"]) for doc in breed_docs}
+        # Map to labels (using cached BREED_MAP)
+        top_breeds = [
+            class_labels[idx.item()] if idx.item() < len(class_labels) else f"Unknown({idx.item()})"
+            for idx in top_idxs[0]
+        ]
 
         predictions = [
             {
                 "breed": breed,
-                "breed_id": breed_map.get(breed),
+                "breed_id": BREED_MAP.get(breed),
                 "accuracy": round(prob.item() * 100, 2)
             }
             for prob, breed in zip(top_probs[0], top_breeds)
         ]
 
-        return jsonify({
-            "message": "Image uploaded and predicted successfully",
-            "data": {
-                "predictions": predictions
-            }
-        }), 201
+        total_time = time.time() - start_total
+        timing_info = {
+            "preprocess_time": round(preprocess_time, 3),
+            "inference_time": round(infer_time, 3),
+            "total_time": round(total_time, 3)
+        }
+
+        return build_response(201, "Prediction successful", {"predictions": predictions, "timing": timing_info})
 
     except Exception as e:
-        return jsonify({"message": "Internal Server Error", "error": str(e)}), 500
+        return build_response(500, "Internal Server Error", {"error": str(e)})
 
 @app.route("/")
 def home():
     return "Hello, Flask on Render!"
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
