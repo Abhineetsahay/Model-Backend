@@ -28,9 +28,11 @@ except errors.ConnectionFailure as e:
     collection = None
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Force CPU-only inference to reduce memory usage on Render
+device = torch.device("cpu")
 model = torch.jit.load("breed_classifier_final_prod.pt", map_location=device)
-model = torch.jit.optimize_for_inference(model) 
+model = torch.jit.optimize_for_inference(model)
 model.eval()
 
 preprocess = transforms.Compose([
@@ -197,7 +199,7 @@ def upload_and_predict():
         start_preprocess = time.time()
         # Preprocess
         image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        input_tensor = preprocess(image).unsqueeze(0).to(device)
+        input_tensor = preprocess(image).unsqueeze(0)
         preprocess_time = time.time() - start_preprocess
 
         # Inference
