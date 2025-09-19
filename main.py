@@ -190,7 +190,7 @@ def upload_and_predict():
             "description": request.form.get("description")
         }
         
-        model = torch.load("breed_classifier_final_prod.pt", map_location=torch.device("cpu"), weights_only=False)
+        model = torch.jit.load("breed_classifier_final_prod.pt", map_location=torch.device("cpu"))
         model.eval()
 
         img_bytes = image_file.read()
