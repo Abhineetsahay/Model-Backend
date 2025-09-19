@@ -50,7 +50,6 @@ def build_response(status_code, message, body=None):
 def login():
     try:
         data = request.json
-        print("Received data:", data)  # DEBUG
         if not data or "user_id" not in data or "password" not in data:
             return build_response(400, "user_id and password are required", None)
 
@@ -59,11 +58,17 @@ def login():
 
         existing_user = collection.find_one({"user_id": user_id})
         if existing_user:
+            existing_user["_id"] = str(existing_user["_id"])
+    
+            if "password" in existing_user:
+                existing_user.pop("password")
+    
             return build_response(
                 200,
                 "User already exists",
-                {"id": str(existing_user["_id"]), "user_id": existing_user["user_id"]}
+                existing_user
             )
+
 
         result = collection.insert_one({
             "user_id": user_id,
@@ -153,6 +158,7 @@ def get_cattle():
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
 
+
 @app.route("/get-breed/<breed_id>", methods=["GET"])
 def get_breed(breed_id):
     try:
@@ -184,11 +190,9 @@ def upload_and_predict():
             "description": request.form.get("description")
         }
 
-        # Load model
         model = torch.load("breed_classifier_production.pt", map_location=torch.device("cpu"), weights_only=False)
         model.eval()
 
-        # Preprocess image
         img_bytes = image_file.read()
         image = Image.open(io.BytesIO(img_bytes)).convert('RGB')
         preprocess = transforms.Compose([
@@ -197,7 +201,6 @@ def upload_and_predict():
         ])
         input_tensor = preprocess(image).unsqueeze(0)
 
-        # Predict
         with torch.no_grad():
             output = model(input_tensor)
             probabilities = F.softmax(output, dim=1)
@@ -223,28 +226,18 @@ def upload_and_predict():
                 "accuracy": round(prob.item() * 100, 2)
             })
 
-        # Upload image to Cloudinary
         image_file.seek(0)
         upload_result = cloudinary.uploader.upload(
             image_file,
             folder="Model"
         )
 
-        # Store document in DB
-        doc = {
-            "url": upload_result.get("secure_url"),
-            **metadata,
-            "predictions": predictions
-        }
-        result = collection.insert_one(doc)
-
         return build_response(
             201,
             "Image uploaded and predicted successfully",
             {
-                "id": str(result.inserted_id),
-                "url": upload_result.get("secure_url"),
-                "predictions": predictions
+            "url": upload_result.get("secure_url"),
+            "predictions": predictions
             }
         )
 

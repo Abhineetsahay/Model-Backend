@@ -17,9 +17,11 @@ This API provides endpoints for user registration, cattle management, breed fetc
 }
 ```
 
-* **Description:** Registers a new user. Returns conflict if user already exists.  
-* **Response:**
+* **Description:** Registers a new user. If the user already exists, returns their details (without password). Handles missing fields and server errors.
 
+* **Responses:**
+
+**Success (User Registered):**
 ```json
 {
   "status_code": 201,
@@ -28,6 +30,39 @@ This API provides endpoints for user registration, cattle management, breed fetc
     "id": "mongo_inserted_id",
     "user_id": "user_id"
   }
+}
+```
+
+**User Already Exists:**
+```json
+{
+  "status_code": 200,
+  "message": "User already exists",
+  "body": {
+    "_id": "mongo_id",
+    "user_id": "user_id",
+    "name": "name",
+    "phone_number": "phone_number",
+    "location": "Location"
+  }
+}
+```
+
+**Missing Fields:**
+```json
+{
+  "status_code": 400,
+  "message": "user_id and password are required",
+  "body": null
+}
+```
+
+**Internal Server Error:**
+```json
+{
+  "status_code": 500,
+  "message": "Internal Server Error",
+  "body": {"error": "error details"}
 }
 ```
 
