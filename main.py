@@ -250,8 +250,4 @@ def home():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    # Debug mode for local development
-    is_local = os.environ.get("ENVIRONMENT") != "production"
-    app.run(host="127.0.0.1" if is_local else "0.0.0.0", 
-            port=port,
-            debug=is_local)
+    app.run(host="0.0.0.0", port=port)
