@@ -130,8 +130,8 @@ def push_cattle():
         return build_response(500, "Internal Server Error", {"error": str(e)})
 
 
-@app.route("/get-cattle", methods=["GET"])
-def get_cattle():
+@app.route("/get-breed", methods=["GET"])
+def get_breed():
     try:
         user_id = request.args.get("userId")
         if not user_id:
@@ -224,4 +224,4 @@ def home():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port)
