@@ -210,7 +210,6 @@ def upload_and_predict():
 
         breed_collection = db["Breed"]
 
-        # Get top predicted breed names
         top_breeds = [class_labels[idx.item()] if idx.item() < len(class_labels) else f"Unknown({idx.item()})" 
                       for idx in top_idxs[0]]
 
