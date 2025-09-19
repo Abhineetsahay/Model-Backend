@@ -2,8 +2,6 @@ from flask import Flask, request, jsonify
 from pymongo import MongoClient, errors
 from dotenv import load_dotenv
 import os
-import cloudinary
-import cloudinary.uploader
 from datetime import datetime
 from PIL import Image
 import torch
@@ -32,11 +30,22 @@ except errors.ConnectionFailure as e:
     print(f"MongoDB connection failed: {e}")
     collection = None
 
-cloudinary.config(
-    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
-    api_key=os.getenv("CLOUDINARY_API_KEY"),
-    api_secret=os.getenv("CLOUDINARY_API_SECRET")
-)
+model = torch.jit.load("breed_classifier_final_prod.pt", map_location="cpu")
+model.eval()
+
+preprocess = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+])
+
+class_labels = ['Alambadi', 'Amritmahal', 'Ayrshire', 'Banni', 'Bargur', 'Bhadawari',
+    'Brown Swiss', 'Dangi', 'Deoni', 'Gir', 'Guernsey', 'Hallikar', 'Hariana',
+    'Holstein Friesian', 'Jaffarabadi', 'Jersey', 'Kangayam', 'Kankrej',
+    'Kasaragod', 'Kenkatha', 'Kherigarh', 'Khillari', 'Krishna Valley',
+    'Malnad Gidda', 'Mehsana', 'Murrah', 'Nagori', 'Nagpuri', 'Nili Ravi',
+    'Nimari', 'Ongole', 'Pulikulam', 'Rathi', 'Red Dane', 'Red Sindhi',
+    'Sahiwal', 'Surti', 'Tharparkar', 'Toda', 'Umblachery','Vechur'
+]
 
 def build_response(status_code, message, body=None):
     return jsonify({
@@ -180,25 +189,14 @@ def get_breed(breed_id):
 @app.route("/upload-and-predict", methods=["POST"])
 def upload_and_predict():
     try:
-        if 'image' not in request.files:
-            return build_response(400, "No image file provided", None)
+        if "image" not in request.files:
+            return jsonify({"message": "No image file provided"}), 400
 
-        image_file = request.files['image']
-
-        metadata = {
-            "name": request.form.get("name"),
-            "description": request.form.get("description")
-        }
-        
-        model = torch.jit.load("breed_classifier_final_prod.pt", map_location=torch.device("cpu"))
-        model.eval()
-
+        image_file = request.files["image"]
         img_bytes = image_file.read()
-        image = Image.open(io.BytesIO(img_bytes)).convert('RGB')
-        preprocess = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-        ])
+
+        # Preprocess
+        image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         input_tensor = preprocess(image).unsqueeze(0)
 
         with torch.no_grad():
@@ -206,42 +204,30 @@ def upload_and_predict():
             probabilities = F.softmax(output, dim=1)
             top_probs, top_idxs = torch.topk(probabilities, 3)
 
-        class_labels = ['Alambadi', 'Amritmahal', 'Ayrshire', 'Banni', 'Bargur', 'Bhadawari', 'Brown Swiss', 'Dangi', 'Deoni', 'Gir', 'Guernsey', 'Hallikar', 'Hariana', 'Holstein Friesian', 'Jaffarabadi', 'Jersey', 'Kangayam', 'Kankrej', 'Kasaragod', 'Kenkatha', 'Kherigarh', 'Khillari', 'Krishna Valley', 'Malnad Gidda', 'Mehsana', 'Murrah', 'Nagori', 'Nagpuri', 'Nili Ravi', 'Nimari', 'Ongole', 'Pulikulam', 'Rathi', 'Red Dane', 'Red Sindhi', 'Sahiwal', 'Surti', 'Tharparkar', 'Toda', 'Umblachery','Vechur']
-
-        breed_collection = db["Breed"]
-
-        top_breeds = [class_labels[idx.item()] if idx.item() < len(class_labels) else f"Unknown({idx.item()})" 
+        top_breeds = [class_labels[idx.item()] if idx.item() < len(class_labels) else f"Unknown({idx.item()})"
                       for idx in top_idxs[0]]
-
-        # Query MongoDB once for all top breed IDs
+        breed_collection = db["Breed"]
         breed_docs = breed_collection.find({"BreedName": {"$in": top_breeds}}, {"_id": 1, "BreedName": 1})
         breed_map = {doc["BreedName"]: str(doc["_id"]) for doc in breed_docs}
 
-        predictions = []
-        for prob, breed_name in zip(top_probs[0], top_breeds):
-            predictions.append({
-                "breed": breed_name,
-                "breed_id": breed_map.get(breed_name),
-                "accuracy": round(prob.item() * 100, 2)
-            })
-
-        image_file.seek(0)
-        upload_result = cloudinary.uploader.upload(
-            image_file,
-            folder="Model"
-        )
-
-        return build_response(
-            201,
-            "Image uploaded and predicted successfully",
+        predictions = [
             {
-            "url": upload_result.get("secure_url"),
-            "predictions": predictions
+                "breed": breed,
+                "breed_id": breed_map.get(breed),
+                "accuracy": round(prob.item() * 100, 2)
             }
-        )
+            for prob, breed in zip(top_probs[0], top_breeds)
+        ]
+
+        return jsonify({
+            "message": "Image uploaded and predicted successfully",
+            "data": {
+                "predictions": predictions
+            }
+        }), 201
 
     except Exception as e:
-        return build_response(500, "Internal Server Error", {"error": str(e)})
+        return jsonify({"message": "Internal Server Error", "error": str(e)}), 500
 
 @app.route("/")
 def home():
