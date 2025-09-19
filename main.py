@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 import time
+import gc
 from pymongo import MongoClient, errors
 from dotenv import load_dotenv
 import os
@@ -210,6 +211,12 @@ def upload_and_predict():
             top_probs, top_idxs = torch.topk(probabilities, 3)
         infer_time = time.time() - start_infer
 
+        # Clear memory
+        del output, probabilities, input_tensor
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
         # Map to labels (using cached BREED_MAP)
         top_breeds = [
             class_labels[idx.item()] if idx.item() < len(class_labels) else f"Unknown({idx.item()})"
@@ -243,4 +250,8 @@ def home():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    # Debug mode for local development
+    is_local = os.environ.get("ENVIRONMENT") != "production"
+    app.run(host="127.0.0.1" if is_local else "0.0.0.0", 
+            port=port,
+            debug=is_local)

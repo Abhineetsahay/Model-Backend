@@ -5,3 +5,4 @@ python-dotenv
 torch==2.8.0+cpu
 torchvision==0.23.0+cpu
 Pillow
+gunicorn
