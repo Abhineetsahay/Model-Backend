@@ -70,12 +70,12 @@ preprocess = transforms.Compose([
 ])
 
 try:
-    breed_docs = list(breed_collection.find({}, {"_id": 1, "BreedName": 1}))
-    breed_docs = list(breed_collection.find({}, {"_id": 1, "BreedName": 1, "Location": 1}))
+    breed_docs = list(breed_collection.find({}, {"_id": 1, "BreedName": 1, "Location": 1, "Species": 1}))
     BREED_MAP = {
     doc["BreedName"]: {
         "id": str(doc["_id"]),
-        "location": doc.get("Location", [])
+        "location": doc.get("Location", []),
+        "species": doc.get("Species", "")  # Using correct case 'Species'
     }
     for doc in breed_docs
     }
@@ -243,9 +243,11 @@ def upload_and_predict():
         predictions = []
         for prob, breed in zip(top_probs[0], top_breeds):
             breed_info = BREED_MAP.get(breed, {})
+            print(f"Debug - Breed: {breed}, Info: {breed_info}")  # Debug print
             predictions.append({
                "breed": breed,
                "breed_id": breed_info.get("id"),
+               "species": breed_info.get("Species", ""),  # Using correct case
                "location": breed_info.get("location", []),
                "accuracy": round(prob.item() * 100, 2)
             })
