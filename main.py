@@ -75,7 +75,8 @@ try:
     doc["BreedName"]: {
         "id": str(doc["_id"]),
         "location": doc.get("Location", []),
-        "species": doc.get("Species", "")  # Using correct case 'Species'
+        "species": doc.get("Species", ""),  # Store species from MongoDB
+        "Species": doc.get("Species", "")   # Also store with original case
     }
     for doc in breed_docs
     }
@@ -243,11 +244,10 @@ def upload_and_predict():
         predictions = []
         for prob, breed in zip(top_probs[0], top_breeds):
             breed_info = BREED_MAP.get(breed, {})
-            print(f"Debug - Breed: {breed}, Info: {breed_info}")  # Debug print
             predictions.append({
                "breed": breed,
                "breed_id": breed_info.get("id"),
-               "species": breed_info.get("Species", ""),  # Using correct case
+               "species": breed_info.get("Species", "") or breed_info.get("species", ""),  # Try both cases
                "location": breed_info.get("location", []),
                "accuracy": round(prob.item() * 100, 2)
             })
