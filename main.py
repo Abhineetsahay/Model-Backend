@@ -70,7 +70,14 @@ preprocess = transforms.Compose([
 
 try:
     breed_docs = list(breed_collection.find({}, {"_id": 1, "BreedName": 1}))
-    BREED_MAP = {doc["BreedName"]: str(doc["_id"]) for doc in breed_docs}
+    breed_docs = list(breed_collection.find({}, {"_id": 1, "BreedName": 1, "Location": 1}))
+    BREED_MAP = {
+    doc["BreedName"]: {
+        "id": str(doc["_id"]),
+        "location": doc.get("Location", [])
+    }
+    for doc in breed_docs
+    }
 except Exception as e:
     print(f"Could not cache breeds from MongoDB: {e}")
     BREED_MAP = {}
@@ -184,6 +191,16 @@ def get_cattle():
         return build_response(200, "Cattle data fetched successfully", user.get("cattles", []))
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
+    
+@app.route("/get-breed", methods=["GET"])
+def get_all_breed():
+    try:
+        breeds = list(breed_collection.find({}))
+        for breed in breeds:
+            breed["_id"] = str(breed["_id"]) 
+        return build_response(200, "Breeds fetched successfully", breeds)
+    except Exception as e:
+        return build_response(500, "Internal Server Error", {"error": str(e)})
 
 @app.route("/get-breed/<breed_id>", methods=["GET"])
 def get_breed(breed_id):
@@ -202,24 +219,19 @@ def get_breed(breed_id):
 @app.route("/upload-and-predict", methods=["POST"])
 def upload_and_predict():
     try:
-        start_total = time.time()
         if "image" not in request.files:
             return build_response(400, "No image file provided")
 
         image_file = request.files["image"]
         img_bytes = image_file.read()
         
-        start_preprocess = time.time()
         image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         input_tensor = preprocess(image).unsqueeze(0).to(device)
-        preprocess_time = time.time() - start_preprocess
 
-        start_infer = time.time()
         with torch.no_grad():
             output = model(input_tensor)
             probabilities = F.softmax(output, dim=1)
             top_probs, top_idxs = torch.topk(probabilities, 3)
-        infer_time = time.time() - start_infer
 
         del output, probabilities, input_tensor
         if torch.cuda.is_available():
@@ -227,23 +239,17 @@ def upload_and_predict():
         gc.collect()
 
         top_breeds = [class_labels[idx.item()] for idx in top_idxs[0]]
-        predictions = [
-            {
-                "breed": breed,
-                "breed_id": BREED_MAP.get(breed),
-                "accuracy": round(prob.item() * 100, 2)
-            }
-            for prob, breed in zip(top_probs[0], top_breeds)
-        ]
-
-        total_time = time.time() - start_total
-        timing_info = {
-            "preprocess_time": round(preprocess_time, 3),
-            "inference_time": round(infer_time, 3),
-            "total_time": round(total_time, 3)
-        }
-
-        return build_response(201, "Prediction successful", {"predictions": predictions, "timing": timing_info})
+        predictions = []
+        for prob, breed in zip(top_probs[0], top_breeds):
+            breed_info = BREED_MAP.get(breed, {})
+            predictions.append({
+               "breed": breed,
+               "breed_id": breed_info.get("id"),
+               "location": breed_info.get("location", []),
+               "accuracy": round(prob.item() * 100, 2)
+            })
+       
+        return build_response(201, "Prediction successful", {"predictions": predictions})
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
 
