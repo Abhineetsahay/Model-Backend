@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-import time
+from flask_cors import CORS 
 import gc
 from pymongo import MongoClient, errors
 from dotenv import load_dotenv
@@ -16,6 +16,7 @@ from bson import ObjectId
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app)
 
 # ------------------ DATABASE CONFIG ------------------
 MONGO_URI = os.getenv("MONGO_URI")
