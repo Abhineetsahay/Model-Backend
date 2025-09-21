@@ -98,7 +98,7 @@ This API provides endpoints for user registration, cattle management, breed fetc
   "body": {
     "user_id": "user_id",
     "tag_number": "tag_number",
-    "breed_id": "mongo_object_id",
+  "breed_id": "breed_id_string",
     "breed_name": "BreedName"
   }
 }
@@ -189,23 +189,31 @@ breed_id = Mongo ObjectId
 {
   "status_code": 201,
   "message": "Image uploaded and predicted successfully",
-  "body": {
-    "url": "cloudinary_image_url",
-    "predictions": [
-      {
-        "breed": "Gir",
-        "accuracy": 87.32
-      },
-      {
-        "breed": "Sahiwal",
-        "accuracy": 8.45
-      },
-      {
-        "breed": "Hallikar",
-        "accuracy": 4.23
-      }
-    ]
-  }
+    "body": {
+      "predictions": [
+        {
+          "breed": "Gir",
+          "breed_id": "68cd08e514cdd9b157d41c50",
+          "species": "Cow",
+          "location": ["Tamil Nadu"],
+          "accuracy": 87.32
+        },
+        {
+          "breed": "Sahiwal",
+          "breed_id": "68cd08e514cdd9b157d41c51",
+          "species": "Cow",
+          "location": ["Punjab", "Haryana"],
+          "accuracy": 8.45
+        },
+        {
+          "breed": "Hallikar",
+          "breed_id": "68cd08e514cdd9b157d41c52",
+          "species": "Cow",
+          "location": ["Karnataka"],
+          "accuracy": 4.23
+        }
+      ]
+    }
 }
 ```
 

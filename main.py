@@ -146,6 +146,7 @@ def push_cattle():
             return build_response(404, "User not found")
 
         breed_id = BREED_MAP.get(breed_name)
+        print(BREED_MAP)
         if not breed_id:
             return build_response(404, f"Breed '{breed_name}' not found in cache")
 
@@ -157,7 +158,7 @@ def push_cattle():
             "species": data["species"],
             "sex": data.get("sex"),
             "dob": data.get("dob"),
-            "breed_id": breed_id,
+                "breed_id": breed_id["id"] if breed_id else None,
             "breed_name": breed_name
         }
 
@@ -172,7 +173,7 @@ def push_cattle():
             {
                 "user_id": user_id,
                 "tag_number": data["tag_number"],
-                "breed_id": breed_id,
+                    "breed_id": breed_id["id"] if breed_id else None,
                 "breed_name": breed_name
             }
         )
