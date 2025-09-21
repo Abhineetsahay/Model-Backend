@@ -266,10 +266,11 @@ def upload_and_predict():
         lang = request.headers.get("accept-language", "en")
         top_breeds = [class_labels[idx.item()] for idx in top_idxs[0]]
         predictions = []
-        for prob, breed in zip(top_probs[0], top_breeds):
-            breed_doc = breed_collection.find_one({f"breedName.{lang}": breed})
+        for prob, breed_en in zip(top_probs[0], top_breeds):
+            breed_doc = breed_collection.find_one({"breedName.en": breed_en})
+            breed_name_lang = breed_doc.get("breedName", {}).get(lang, breed_en) if breed_doc else breed_en
             predictions.append({
-                "breed": breed,
+                "breed": breed_name_lang,
                 "breed_id": str(breed_doc["_id"]) if breed_doc else None,
                 "species": breed_doc.get("species", {}).get(lang, "") if breed_doc else "",
                 "location": breed_doc.get("location", []) if breed_doc else [],
