@@ -70,16 +70,16 @@ preprocess = transforms.Compose([
 ])
 
 try:
-    breed_docs = list(breed_collection.find({}, {"_id": 1, "BreedName": 1, "Location": 1, "Species": 1}))
-    BREED_MAP = {
-    doc["BreedName"]: {
-        "id": str(doc["_id"]),
-        "location": doc.get("Location", []),
-        "species": doc.get("Species", ""),  # Store species from MongoDB
-        "Species": doc.get("Species", "")   # Also store with original case
-    }
-    for doc in breed_docs
-    }
+    breed_docs = list(breed_collection.find({}))
+    BREED_MAP = {}
+    for doc in breed_docs:
+        for lang_key, breed_name in doc.get("breedName", {}).items():
+            BREED_MAP[breed_name] = {
+                "id": str(doc["_id"]),
+                "location": doc.get("location", []),
+                "species": doc.get("species", {}).get(lang_key, ""),
+                "Species": doc.get("species", {}).get(lang_key, "")
+            }
 except Exception as e:
     print(f"Could not cache breeds from MongoDB: {e}")
     BREED_MAP = {}
@@ -140,16 +140,16 @@ def push_cattle():
 
         user_id = data["user_id"]
         breed_name = data["breed"]
-
+        lang = request.headers.get("accept-language", "en")
         user = collection.find_one({"user_id": user_id})
         if not user:
             return build_response(404, "User not found")
-
-        breed_id = BREED_MAP.get(breed_name)
-        print(BREED_MAP)
-        if not breed_id:
-            return build_response(404, f"Breed '{breed_name}' not found in cache")
-
+        # Find breed by name in the selected language
+        breed_doc = breed_collection.find_one({f"breedName.{lang}": breed_name})
+        if not breed_doc:
+            return build_response(404, f"Breed '{breed_name}' not found in DB for language '{lang}'")
+        breed_id = str(breed_doc["_id"])
+        breed_collection.update_one({"_id": ObjectId(breed_id)}, {"$inc": {"count": 1}})
         cattle_doc = {
             "name": data.get("name"),
             "tag_number": data["tag_number"],
@@ -158,22 +158,20 @@ def push_cattle():
             "species": data["species"],
             "sex": data.get("sex"),
             "dob": data.get("dob"),
-                "breed_id": breed_id["id"] if breed_id else None,
+            "breed_id": breed_id,
             "breed_name": breed_name
         }
-
         collection.update_one(
             {"user_id": user_id},
             {"$push": {"cattles": cattle_doc}}
         )
-
         return build_response(
             201,
             "Cattle added successfully",
             {
                 "user_id": user_id,
                 "tag_number": data["tag_number"],
-                    "breed_id": breed_id["id"] if breed_id else None,
+                "breed_id": breed_id,
                 "breed_name": breed_name
             }
         )
@@ -189,7 +187,7 @@ def get_cattle():
 
         user = collection.find_one({"user_id": user_id}, {"_id": 0, "cattles": 1})
         if not user:
-            return build_response(404, "User not found")
+            return build_response(404, "Cattle not found")
 
         return build_response(200, "Cattle data fetched successfully", user.get("cattles", []))
     except Exception as e:
@@ -198,10 +196,24 @@ def get_cattle():
 @app.route("/get-breed", methods=["GET"])
 def get_all_breed():
     try:
+        lang = request.headers.get("accept-language", "en")
         breeds = list(breed_collection.find({}))
+        result = []
         for breed in breeds:
-            breed["_id"] = str(breed["_id"]) 
-        return build_response(200, "Breeds fetched successfully", breeds)
+            breed_id = str(breed["_id"])
+            breed_obj = {
+                "breedId": breed.get("breedId", None),
+                "breedName": breed.get("breedName", {}).get(lang, ""),
+                "breedingTrait": breed.get("breedingTrait", {}).get(lang, ""),
+                "species": breed.get("species", {}).get(lang, ""),
+                "physicalDesc": breed.get("physicalDesc", {}).get(lang, ""),
+                "mainUses": breed.get("mainUses", {}).get(lang, ""),
+                "location": breed.get("location", []),
+                "count": breed.get("count", 0),
+                "_id": breed_id
+            }
+            result.append(breed_obj)
+        return build_response(200, "Breeds fetched successfully", result)
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
 
@@ -210,12 +222,22 @@ def get_breed(breed_id):
     try:
         if not ObjectId.is_valid(breed_id):
             return build_response(400, "Invalid breed_id format")
-
-        breed = breed_collection.find_one({"_id": ObjectId(breed_id)}, {"_id": 0})
+        lang = request.headers.get("accept-language", "en")
+        breed = breed_collection.find_one({"_id": ObjectId(breed_id)})
         if not breed:
             return build_response(404, "Breed not found")
-
-        return build_response(200, "Breed fetched successfully", breed)
+        breed_obj = {
+            "breedId": breed.get("breedId", None),
+            "breedName": breed.get("breedName", {}).get(lang, ""),
+            "breedingTrait": breed.get("breedingTrait", {}).get(lang, ""),
+            "species": breed.get("species", {}).get(lang, ""),
+            "physicalDesc": breed.get("physicalDesc", {}).get(lang, ""),
+            "mainUses": breed.get("mainUses", {}).get(lang, ""),
+            "location": breed.get("location", []),
+            "count": breed.get("count", 0),
+            "_id": str(breed["_id"])
+        }
+        return build_response(200, "Breed fetched successfully", breed_obj)
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
 
@@ -241,18 +263,18 @@ def upload_and_predict():
             torch.cuda.empty_cache()
         gc.collect()
 
+        lang = request.headers.get("accept-language", "en")
         top_breeds = [class_labels[idx.item()] for idx in top_idxs[0]]
         predictions = []
         for prob, breed in zip(top_probs[0], top_breeds):
-            breed_info = BREED_MAP.get(breed, {})
+            breed_doc = breed_collection.find_one({f"breedName.{lang}": breed})
             predictions.append({
-               "breed": breed,
-               "breed_id": breed_info.get("id"),
-               "species": breed_info.get("Species", "") or breed_info.get("species", ""),  # Try both cases
-               "location": breed_info.get("location", []),
-               "accuracy": round(prob.item() * 100, 2)
+                "breed": breed,
+                "breed_id": str(breed_doc["_id"]) if breed_doc else None,
+                "species": breed_doc.get("species", {}).get(lang, "") if breed_doc else "",
+                "location": breed_doc.get("location", []) if breed_doc else [],
+                "accuracy": round(prob.item() * 100, 2)
             })
-       
         return build_response(201, "Prediction successful", {"predictions": predictions})
     except Exception as e:
         return build_response(500, "Internal Server Error", {"error": str(e)})
